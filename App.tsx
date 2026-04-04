@@ -10,7 +10,6 @@ import {
   Alert,
   StyleSheet,
   TouchableOpacity,
-  Dimensions,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -52,25 +51,37 @@ async function searchMushroomByName(name: string): Promise<any[]> {
   return json.results || [];
 }
 
-// ---------- 动态获取图片（后备方案）----------
+// ---------- 使用 iNaturalist API 获取蘑菇图片（核心修复）----------
 async function fetchMushroomImage(scientificName: string): Promise<string | null> {
+  if (!scientificName) return null;
   try {
+    // 1. 搜索物种 ID
     const searchUrl = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(scientificName)}&per_page=1`;
     const searchRes = await fetch(searchUrl);
     const searchJson = await searchRes.json();
-    const taxon = searchJson.results?.[0];
-    if (!taxon) return null;
-    const photoUrl = `https://api.inaturalist.org/v1/taxa/${taxon.id}?photos=true`;
-    const photoRes = await fetch(photoUrl);
-    const photoJson = await photoRes.json();
-    const photo = photoJson.results?.photos?.[0];
-    return photo ? photo.url.replace('square', 'medium') : null;
-  } catch {
+    if (!searchJson.results || searchJson.results.length === 0) {
+      console.log(`未找到学名: ${scientificName}`);
+      return null;
+    }
+    const taxonId = searchJson.results[0].id;
+
+    // 2. 获取物种详情（包含图片）
+    const taxonUrl = `https://api.inaturalist.org/v1/taxa/${taxonId}`;
+    const taxonRes = await fetch(taxonUrl);
+    const taxonJson = await taxonRes.json();
+    const defaultPhoto = taxonJson.results?.[0]?.default_photo;
+    if (defaultPhoto && defaultPhoto.medium_url) {
+      console.log(`获取图片成功: ${scientificName} -> ${defaultPhoto.medium_url}`);
+      return defaultPhoto.medium_url;
+    }
+    return null;
+  } catch (error) {
+    console.error(`获取图片失败 ${scientificName}:`, error);
     return null;
   }
 }
 
-// ---------- 详情页（修复 Picker 高度 + 图片显示）----------
+// ---------- 详情页（使用 iNaturalist API 动态加载图片）----------
 function MushroomDetailScreen({
   route,
   onBack,
@@ -91,17 +102,12 @@ function MushroomDetailScreen({
     const loadImage = async () => {
       setLoadingImage(true);
       setImageError(false);
-      // 优先使用数据中预置的 imageUrl
-      if (currentMushroom.imageUrl) {
-        setImageUrl(currentMushroom.imageUrl);
-        setLoadingImage(false);
-        return;
-      }
-      // 后备：从 iNaturalist 获取
+      setImageUrl(null);
+      // 动态从 iNaturalist 获取图片
       const url = await fetchMushroomImage(currentMushroom.scientific);
       if (mounted) {
         setImageUrl(url);
-        setImageError(!url);
+        if (!url) setImageError(true);
       }
       setLoadingImage(false);
     };
@@ -109,9 +115,7 @@ function MushroomDetailScreen({
     return () => { mounted = false; };
   }, [selectedIndex]);
 
-  const handleImageError = () => {
-    setImageError(true);
-  };
+  const handleImageError = () => setImageError(true);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -123,7 +127,7 @@ function MushroomDetailScreen({
             selectedValue={selectedIndex}
             onValueChange={(itemValue) => setSelectedIndex(itemValue)}
             style={styles.picker}
-            numberOfLines={1} // 确保单行显示，避免高度溢出
+            numberOfLines={1}
           >
             {mushrooms.map((m, idx) => (
               <Picker.Item key={idx} label={m.name} value={idx} />
@@ -166,7 +170,7 @@ function MushroomDetailScreen({
   );
 }
 
-// ---------- 主页（保持不变，但确保列表滚动）----------
+// ---------- 主页（保持不变）----------
 function HomeScreen({
   onNavigate,
   onOpenDetail,
@@ -410,19 +414,8 @@ const styles = StyleSheet.create({
   preview: { width: '100%', height: 200, borderRadius: 12, marginVertical: 10, resizeMode: 'cover' },
   buttonRow: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 16 },
   disclaimer: { marginTop: 8, fontSize: 12, color: 'red' },
-  pickerContainer: { 
-    borderWidth: 1, 
-    borderColor: '#ccc', 
-    borderRadius: 8, 
-    marginVertical: 10, 
-    backgroundColor: 'white',
-    minHeight: 60, // 确保下拉框有足够高度
-    justifyContent: 'center',
-  },
-  picker: { 
-    height: 60, 
-    width: '100%',
-  },
+  pickerContainer: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, marginVertical: 10, backgroundColor: 'white', minHeight: 60, justifyContent: 'center' },
+  picker: { height: 60, width: '100%' },
   imageContainer: { alignItems: 'center', marginVertical: 20 },
   detailImage: { width: 200, height: 200, borderRadius: 100, resizeMode: 'cover' },
   placeholderImage: { width: 200, height: 200, borderRadius: 100, backgroundColor: '#e0e0e0', justifyContent: 'center', alignItems: 'center' },
