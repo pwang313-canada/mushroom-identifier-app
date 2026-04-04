@@ -1,0 +1,46 @@
+mushroom-identifier-app/
+│
+├── 📂 assets/                      # 静态资源目录
+│   └── 📂 images/                  # 存放App图标和启动屏图片
+│
+├── 📂 src/                         # 主要源代码
+│   ├── 📂 components/              # 可复用的UI组件
+│   │   ├── CameraView.tsx          # 相机拍照组件
+│   │   ├── ImagePicker.tsx         # 相册选择组件
+│   │   ├── ResultCard.tsx          # 识别结果卡片
+│   │   └── Disclaimer.tsx          # 免责声明弹窗组件
+│   │
+│   ├── 📂 screens/                 # 页面视图
+│   │   ├── HomeScreen.tsx          # 主页面（拍照/选择入口）
+│   │   ├── CameraScreen.tsx        # 相机拍照页面
+│   │   ├── ResultScreen.tsx        # 结果显示页面
+│   │   └── HistoryScreen.tsx       # 识别历史页面（MVP可暂不实现）
+│   │
+│   ├── 📂 services/                # 业务逻辑与服务调用
+│   │   ├── imageRecognition.ts     # 封装图像识别API调用逻辑
+│   │   └── storageService.ts       # 本地历史记录存储（AsyncStorage）
+│   │
+│   ├── 📂 hooks/                   # 自定义React Hooks
+│   │   ├── useCamera.ts            # 相机权限与拍照逻辑
+│   │   └── useImageRecognition.ts  # 识别流程状态管理
+│   │
+│   ├── 📂 types/                   # TypeScript类型定义
+│   │   └── recognition.types.ts    # 定义识别结果的接口类型
+│   │
+│   └── 📂 utils/                   # 工具函数
+│       ├── imageProcessor.ts       # 图片压缩与预处理
+│       └── constants.ts            # API地址、提示文本等常量
+│
+├── 📂 __tests__/                   # 单元测试文件
+│   ├── components/                 # 组件测试
+│   └── services/                   # 服务层测试
+│
+├── 📂 e2e/                         # 端到端测试（可选）
+│   └── firstTest.e2e.js           # 使用Detox等框架的测试用例
+│
+├── App.tsx                         # 应用的根组件
+├── app.json                        # Expo应用的配置文件
+├── babel.config.js                 # Babel编译配置
+├── package.json                    # 项目依赖与脚本
+├── tsconfig.json                   # TypeScript配置
+└── README.md                       # 项目说明文档

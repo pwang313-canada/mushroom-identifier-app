@@ -1,0 +1,48 @@
+# Node modules
+node_modules/
+yarn-error.log
+npm-debug.log*
+package-lock.json
+yarn.lock
+
+# Expo
+.expo/
+.expo-shared/
+web-build/
+
+# React Native / Android
+android/app/build/
+android/.gradle/
+android/.idea/
+*.iml
+*.apk
+*.keystore
+
+# React Native / iOS
+ios/Pods/
+ios/build/
+ios/*.xcodeproj/project.xcworkspace/
+ios/*.xcworkspace/
+ios/DerivedData/
+*.app
+*.ipa
+
+# macOS / Linux / Windows
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# JetBrains / VS Code
+.idea/
+.vscode/
+
+# Misc
+*.lock
