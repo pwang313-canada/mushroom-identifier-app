@@ -17,11 +17,59 @@ import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { initDatabase, saveIdentification, getFrequentMushroomsNearby } from './database';
-import { ontarioToxicMushrooms, ontarioCommonMushrooms } from './ontarioMushrooms';
+import { ontarioToxicMushrooms, ontarioCommonMushrooms, Mushroom } from './ontarioMushrooms';
 
 type Screen = 'home' | 'search' | 'camera' | 'detail';
 
-// ---------- iNaturalist 识别 ----------
+// ---------- Helper: clean scientific name (remove spp./sp.) ----------
+function getSearchTerm(scientificName: string): string {
+  const cleaned = scientificName.trim();
+  // Match "spp." or "sp." (case-insensitive, optional dot)
+  if (/spp\.?$/i.test(cleaned) || /sp\.?$/i.test(cleaned)) {
+    const parts = cleaned.split(/\s+/);
+    if (parts.length > 0) return parts[0];
+  }
+  return cleaned;
+}
+
+// ---------- Fetch both image and description from iNaturalist ----------
+async function fetchMushroomDetails(scientificName: string): Promise<{ imageUrl: string | null; description: string | null }> {
+  if (!scientificName) return { imageUrl: null, description: null };
+  const searchTerm = getSearchTerm(scientificName);
+
+  try {
+    // 1. Get taxon ID
+    const searchUrl = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(searchTerm)}&per_page=1`;
+    const searchRes = await fetch(searchUrl);
+    const searchJson = await searchRes.json();
+    if (!searchJson.results || searchJson.results.length === 0) {
+      console.log(`未找到学名: ${scientificName}`);
+      return { imageUrl: null, description: null };
+    }
+    const taxonId = searchJson.results[0].id;
+
+    // 2. Get full taxon details
+    const taxonUrl = `https://api.inaturalist.org/v1/taxa/${taxonId}`;
+    const taxonRes = await fetch(taxonUrl);
+    const taxonJson = await taxonRes.json();
+    const taxon = taxonJson.results?.[0];
+    if (!taxon) return { imageUrl: null, description: null };
+
+    const imageUrl = taxon.default_photo?.medium_url || null;
+    let description = taxon.wikipedia_summary || null;
+    if (!description && taxon.observations_count) {
+      description = `${taxon.name} 在 iNaturalist 上有 ${taxon.observations_count} 条观察记录。`;
+    }
+
+    console.log(`Fetched for ${scientificName}: image=${!!imageUrl}, desc=${!!description}`);
+    return { imageUrl, description };
+  } catch (error) {
+    console.error(`Fetch error for ${scientificName}:`, error);
+    return { imageUrl: null, description: null };
+  }
+}
+
+// ---------- iNaturalist image recognition ----------
 async function identifyMushroom(imageUri: string): Promise<any[]> {
   const formData = new FormData();
   (formData as any).append('image', {
@@ -43,7 +91,7 @@ async function identifyMushroom(imageUri: string): Promise<any[]> {
   }
 }
 
-// ---------- 按名称搜索 ----------
+// ---------- Search by name ----------
 async function searchMushroomByName(name: string): Promise<any[]> {
   const url = `https://api.inaturalist.org/v1/taxons/autocomplete?q=${encodeURIComponent(name)}&per_page=5`;
   const res = await fetch(url);
@@ -51,87 +99,49 @@ async function searchMushroomByName(name: string): Promise<any[]> {
   return json.results || [];
 }
 
-// ---------- 辅助函数：提取属名（如果包含 spp. / sp.）----------
-function getSearchTerm(scientificName: string): string {
-  const cleaned = scientificName.trim();
-  // 匹配 "spp." 或 "sp."（不区分大小写，支持末尾有点或无点）
-  if (/spp\.?$/i.test(cleaned) || /sp\.?$/i.test(cleaned)) {
-    const parts = cleaned.split(/\s+/);
-    if (parts.length > 0) {
-      return parts[0]; // 返回第一个单词（属名）
-    }
-  }
-  return cleaned;
-}
-
-// ---------- 使用 iNaturalist API 获取蘑菇图片（核心修复）----------
-async function fetchMushroomImage(scientificName: string): Promise<string | null> {
-  if (!scientificName) return null;
-  
-  // 关键修复：将 "Morchella spp." 转换为 "Morchella"
-  const searchTerm = getSearchTerm(scientificName);
-  console.log(`原始学名: ${scientificName} -> 搜索词: ${searchTerm}`);
-
-  try {
-    // 1. 搜索物种 ID（使用清洗后的词）
-    const searchUrl = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(searchTerm)}&per_page=1`;
-    const searchRes = await fetch(searchUrl);
-    const searchJson = await searchRes.json();
-    if (!searchJson.results || searchJson.results.length === 0) {
-      console.log(`未找到学名: ${scientificName} (搜索词: ${searchTerm})`);
-      return null;
-    }
-    const taxonId = searchJson.results[0].id;
-
-    // 2. 获取物种详情（包含图片）
-    const taxonUrl = `https://api.inaturalist.org/v1/taxa/${taxonId}`;
-    const taxonRes = await fetch(taxonUrl);
-    const taxonJson = await taxonRes.json();
-    const defaultPhoto = taxonJson.results?.[0]?.default_photo;
-    if (defaultPhoto && defaultPhoto.medium_url) {
-      console.log(`获取图片成功: ${scientificName} -> ${defaultPhoto.medium_url}`);
-      return defaultPhoto.medium_url;
-    }
-    return null;
-  } catch (error) {
-    console.error(`获取图片失败 ${scientificName}:`, error);
-    return null;
-  }
-}
-
-// ---------- 详情页（使用 iNaturalist API 动态加载图片）----------
+// ---------- Detail Screen with local + remote description ----------
 function MushroomDetailScreen({
   route,
   onBack,
 }: {
-  route: { mushrooms: any[]; initialIndex: number; listType: string };
+  route: { mushrooms: Mushroom[]; initialIndex: number; listType: string };
   onBack: () => void;
 }) {
   const { mushrooms, initialIndex, listType } = route;
   const [selectedIndex, setSelectedIndex] = useState(initialIndex);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [loadingImage, setLoadingImage] = useState(false);
+  const [remoteDescription, setRemoteDescription] = useState<string | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [imageError, setImageError] = useState(false);
 
   const currentMushroom = mushrooms[selectedIndex];
+  const localDescription = currentMushroom.description;
+
+  // Debug output
+  console.log('🟢 Mushroom name:', currentMushroom.name);
+  console.log('🟢 Local description:', localDescription);
 
   useEffect(() => {
     let mounted = true;
-    const loadImage = async () => {
-      setLoadingImage(true);
+    const loadDetails = async () => {
+      setLoadingDetails(true);
       setImageError(false);
       setImageUrl(null);
-      // 动态从 iNaturalist 获取图片
-      const url = await fetchMushroomImage(currentMushroom.scientific);
+      setRemoteDescription(null);
+      const { imageUrl, description } = await fetchMushroomDetails(currentMushroom.scientific);
       if (mounted) {
-        setImageUrl(url);
-        if (!url) setImageError(true);
+        setImageUrl(imageUrl);
+        if (!imageUrl) setImageError(true);
+        setRemoteDescription(description);
+        console.log('🟢 Remote description:', description);
       }
-      setLoadingImage(false);
+      setLoadingDetails(false);
     };
-    loadImage();
+    loadDetails();
     return () => { mounted = false; };
   }, [selectedIndex]);
+
+  const finalDescription = localDescription || remoteDescription || '暂无详细描述，请参考专业图鉴。';
 
   const handleImageError = () => setImageError(true);
 
@@ -154,15 +164,11 @@ function MushroomDetailScreen({
         </View>
 
         <View style={styles.imageContainer}>
-          {loadingImage && <ActivityIndicator size="large" />}
-          {!loadingImage && imageUrl && !imageError && (
-            <Image
-              source={{ uri: imageUrl }}
-              style={styles.detailImage}
-              onError={handleImageError}
-            />
+          {loadingDetails && <ActivityIndicator size="large" />}
+          {!loadingDetails && imageUrl && !imageError && (
+            <Image source={{ uri: imageUrl }} style={styles.detailImage} onError={handleImageError} />
           )}
-          {(!imageUrl || imageError) && !loadingImage && (
+          {(!imageUrl || imageError) && !loadingDetails && (
             <View style={styles.placeholderImage}>
               <Text style={styles.placeholderText}>🍄</Text>
               <Text>图片加载失败</Text>
@@ -181,6 +187,16 @@ function MushroomDetailScreen({
               {currentMushroom.type === 'Medicinal' ? '💊 药用蘑菇' : '🍽️ 可食用蘑菇'}
             </Text>
           )}
+
+          {/* Description section - guaranteed to show */}
+          <View style={styles.descriptionContainer}>
+            <Text style={styles.descriptionTitle}>📖 识别特征：</Text>
+            <Text style={styles.descriptionText}>{finalDescription}</Text>
+            {remoteDescription && !localDescription && (
+              <Text style={styles.remoteCredit}>🔍 描述来自 iNaturalist / Wikipedia</Text>
+            )}
+          </View>
+
           <Text style={styles.disclaimer}>⚠️ 请勿仅凭此结果食用蘑菇，务必咨询专家。</Text>
         </View>
       </ScrollView>
@@ -188,14 +204,14 @@ function MushroomDetailScreen({
   );
 }
 
-// ---------- 主页（保持不变）----------
+// ---------- Home Screen ----------
 function HomeScreen({
   onNavigate,
   onOpenDetail,
   currentLocation,
 }: {
   onNavigate: (screen: Screen) => void;
-  onOpenDetail: (mushrooms: any[], idx: number, type: string) => void;
+  onOpenDetail: (mushrooms: Mushroom[], idx: number, type: string) => void;
   currentLocation: { lat: number; lon: number } | null;
 }) {
   const [frequent, setFrequent] = useState<any[]>([]);
@@ -272,7 +288,7 @@ function HomeScreen({
   );
 }
 
-// ---------- 搜索页 ----------
+// ---------- Search Screen ----------
 function SearchByNameScreen({ onBack }: { onBack: () => void }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
@@ -307,7 +323,7 @@ function SearchByNameScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
-// ---------- 拍照识别页 ----------
+// ---------- Camera Screen ----------
 function CameraScreen({ onBack }: { onBack: () => void }) {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [identifying, setIdentifying] = useState(false);
@@ -383,11 +399,11 @@ function CameraScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
-// ---------- 主 App ----------
+// ---------- Main App ----------
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home');
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
-  const [detailParams, setDetailParams] = useState<{ mushrooms: any[]; initialIndex: number; listType: string } | null>(null);
+  const [detailParams, setDetailParams] = useState<{ mushrooms: Mushroom[]; initialIndex: number; listType: string } | null>(null);
 
   useEffect(() => {
     initDatabase();
@@ -400,7 +416,7 @@ export default function App() {
     })();
   }, []);
 
-  const openDetail = (mushrooms: any[], idx: number, type: string) => {
+  const openDetail = (mushrooms: Mushroom[], idx: number, type: string) => {
     setDetailParams({ mushrooms, initialIndex: idx, listType: type });
     setScreen('detail');
   };
@@ -412,7 +428,7 @@ export default function App() {
   return null;
 }
 
-// ---------- 样式 ----------
+// ---------- Styles ----------
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: '#f5f5f5' },
   title: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', marginVertical: 20 },
@@ -441,4 +457,28 @@ const styles = StyleSheet.create({
   detailCard: { backgroundColor: 'white', padding: 20, borderRadius: 16, marginTop: 20 },
   detailName: { fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
   detailScientific: { fontSize: 18, fontStyle: 'italic', textAlign: 'center', color: '#555', marginVertical: 8 },
+  // NEW STYLES for description
+  descriptionContainer: {
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  descriptionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 6,
+    color: '#2c3e50',
+  },
+  descriptionText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#333',
+    marginBottom: 8,
+  },
+  remoteCredit: {
+    fontSize: 10,
+    color: '#888',
+    marginBottom: 4,
+  },
 });

@@ -5,7 +5,7 @@ import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MushroomItem } from '../types/recognition.types';
 import { fetchMushroomsByLocation } from '../services/iNaturalistService';
-import MushroomDetailScreen from './MushroomDetailScreen';
+import MushroomDetailScreen from '../screens/MushroomDetailScreen';
 
 const fallbackImage = require('../assets/images/placeholder.jpg');
 
