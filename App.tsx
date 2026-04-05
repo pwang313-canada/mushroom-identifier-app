@@ -51,16 +51,34 @@ async function searchMushroomByName(name: string): Promise<any[]> {
   return json.results || [];
 }
 
+// ---------- 辅助函数：提取属名（如果包含 spp. / sp.）----------
+function getSearchTerm(scientificName: string): string {
+  const cleaned = scientificName.trim();
+  // 匹配 "spp." 或 "sp."（不区分大小写，支持末尾有点或无点）
+  if (/spp\.?$/i.test(cleaned) || /sp\.?$/i.test(cleaned)) {
+    const parts = cleaned.split(/\s+/);
+    if (parts.length > 0) {
+      return parts[0]; // 返回第一个单词（属名）
+    }
+  }
+  return cleaned;
+}
+
 // ---------- 使用 iNaturalist API 获取蘑菇图片（核心修复）----------
 async function fetchMushroomImage(scientificName: string): Promise<string | null> {
   if (!scientificName) return null;
+  
+  // 关键修复：将 "Morchella spp." 转换为 "Morchella"
+  const searchTerm = getSearchTerm(scientificName);
+  console.log(`原始学名: ${scientificName} -> 搜索词: ${searchTerm}`);
+
   try {
-    // 1. 搜索物种 ID
-    const searchUrl = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(scientificName)}&per_page=1`;
+    // 1. 搜索物种 ID（使用清洗后的词）
+    const searchUrl = `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(searchTerm)}&per_page=1`;
     const searchRes = await fetch(searchUrl);
     const searchJson = await searchRes.json();
     if (!searchJson.results || searchJson.results.length === 0) {
-      console.log(`未找到学名: ${scientificName}`);
+      console.log(`未找到学名: ${scientificName} (搜索词: ${searchTerm})`);
       return null;
     }
     const taxonId = searchJson.results[0].id;

@@ -1,52 +1,51 @@
 // src/screens/HomeScreen.tsx
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, StyleSheet } from 'react-native';
+import { useMushroomObservations } from '../hooks/useMushroomObservations';
 import { useNavigation } from '@react-navigation/native';
 
+const fallbackImage = require('../assets/images/placeholder.jpg');
+
 export default function HomeScreen() {
+  const { edible, toxic, loading, error } = useMushroomObservations();
   const navigation = useNavigation();
 
-  const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      alert('需要相机权限才能拍照识别蘑菇');
-      return;
-    }
-    
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      quality: 0.8,
-    });
-    
-    if (!result.canceled) {
-      // 跳转到识别结果页面，并传递图片URI
-      navigation.navigate('Result', { imageUri: result.assets[0].uri });
-    }
-  };
+  if (loading) return <ActivityIndicator style={{ flex: 1 }} size="large" />;
+  if (error) return <Text style={{ color: 'red' }}>{error}</Text>;
 
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      quality: 0.8,
-    });
-    
-    if (!result.canceled) {
-      navigation.navigate('Result', { imageUri: result.assets[0].uri });
-    }
-  };
+  const renderList = (list: typeof edible, title: string) => (
+    <>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {list.length === 0 && <Text style={{ marginBottom: 12 }}>未找到蘑菇</Text>}
+      {list.map(m => (
+        <TouchableOpacity
+          key={m.id}
+          style={styles.card}
+          onPress={() => navigation.navigate('MushroomDetail', { mushroom: m })}
+        >
+          <Image source={m.imageUri ? { uri: m.imageUri } : fallbackImage} style={styles.image} />
+          <View style={{ marginLeft: 12 }}>
+            <Text style={styles.name}>{m.commonName || m.name}</Text>
+            <Text style={styles.scientific}>{m.name}</Text>
+          </View>
+        </TouchableOpacity>
+      ))}
+    </>
+  );
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>🍄 蘑菇识别助手</Text>
-      <TouchableOpacity style={styles.button} onPress={takePhoto}>
-        <Text style={styles.buttonText}>📷 拍照识别</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.button, styles.galleryButton]} onPress={pickImage}>
-        <Text style={styles.buttonText}>🖼️ 从相册选择</Text>
-      </TouchableOpacity>
-      <Text style={styles.disclaimer}>
-        ⚠️ 本应用识别结果仅供参考，请勿用于实际食用决策
-      </Text>
-    </View>
+    <ScrollView style={styles.container}>
+      {renderList(edible, '可食用')}
+      {renderList(toxic, '有毒')}
+    </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16, backgroundColor: '#f5f5f5' },
+  sectionTitle: { fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', padding: 8, borderRadius: 8, marginBottom: 8 },
+  image: { width: 60, height: 60, borderRadius: 30 },
+  name: { fontSize: 16, fontWeight: 'bold' },
+  scientific: { fontSize: 12, color: '#555' },
+});
